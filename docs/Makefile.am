@@ -16,8 +16,10 @@ man_MANS = \
 	idevicecrashreport.1 \
 	idevicename.1 \
 	idevicedebug.1 \
+	idevicedevmodectl.1 \
 	idevicenotificationproxy.1 \
-	idevicesetlocation.1
+	idevicesetlocation.1 \
+	afcclient.1
 
 EXTRA_DIST = $(man_MANS)
 

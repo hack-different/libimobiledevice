@@ -34,7 +34,7 @@
 #include <libgen.h>
 #include <getopt.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #define sleep(x) Sleep(x*1000)
 #endif
@@ -239,7 +239,7 @@ int main(int argc, char *argv[])
 	/* map signals */
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
-#ifndef WIN32
+#ifndef _WIN32
 	signal(SIGQUIT, on_signal);
 	signal(SIGPIPE, SIG_IGN);
 #endif
@@ -289,6 +289,11 @@ int main(int argc, char *argv[])
 		case 'v':
 			printf("%s %s\n", TOOL_NAME, PACKAGE_VERSION);
 			res = 0;
+			goto cleanup;
+			break;
+		default:
+			print_usage(argc, argv, 1);
+			res = 2;
 			goto cleanup;
 			break;
 		}

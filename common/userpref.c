@@ -29,13 +29,18 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
-#ifndef WIN32
+#include <dirent.h>
+#ifndef _WIN32
 #include <pwd.h>
-#endif
 #include <unistd.h>
+#include <libgen.h>
+#include <sys/stat.h>
+#endif
 #include <usbmuxd.h>
 #if defined(HAVE_OPENSSL)
 #include <openssl/bn.h>
@@ -64,12 +69,7 @@
 #error No supported TLS/SSL library enabled
 #endif
 
-#include <dirent.h>
-#include <libgen.h>
-#include <sys/stat.h>
-#include <errno.h>
-
-#ifdef WIN32
+#ifdef _WIN32
 #include <shlobj.h>
 #endif
 
@@ -93,7 +93,7 @@ const ASN1_ARRAY_TYPE pkcs1_asn1_tab[] = {
 };
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 #define DIR_SEP '\\'
 #define DIR_SEP_S "\\"
 #else
@@ -103,7 +103,7 @@ const ASN1_ARRAY_TYPE pkcs1_asn1_tab[] = {
 
 #define USERPREF_CONFIG_EXTENSION ".plist"
 
-#ifdef WIN32
+#ifdef _WIN32
 #define USERPREF_CONFIG_DIR "Apple"DIR_SEP_S"Lockdown"
 #else
 #define USERPREF_CONFIG_DIR "lockdown"
@@ -113,7 +113,7 @@ const ASN1_ARRAY_TYPE pkcs1_asn1_tab[] = {
 
 static char *__config_dir = NULL;
 
-#ifdef WIN32
+#ifdef _WIN32
 static char *userpref_utf16_to_utf8(wchar_t *unistr, long len, long *items_read, long *items_written)
 {
 	if (!unistr || (len <= 0)) return NULL;
@@ -155,7 +155,7 @@ const char *userpref_get_config_dir()
 	if (__config_dir)
 		return __config_dir;
 
-#ifdef WIN32
+#ifdef _WIN32
 	wchar_t path[MAX_PATH+1];
 	HRESULT hr;
 	LPITEMIDLIST pidl = NULL;
@@ -338,7 +338,7 @@ userpref_error_t userpref_read_pair_record(const char *udid, plist_t *pair_recor
 	}
 
 	*pair_record = NULL;
-	plist_from_memory(record_data, record_size, pair_record);
+	plist_from_memory(record_data, record_size, pair_record, NULL);
 	free(record_data);
 
 	if (!*pair_record) {
@@ -435,6 +435,10 @@ userpref_error_t pair_record_generate_keys_and_certs(plist_t pair_record, key_da
 	debug_info("Generating keys and certificates...");
 
 #if defined(HAVE_OPENSSL)
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	EVP_PKEY* root_pkey = EVP_RSA_gen(2048);
+	EVP_PKEY* host_pkey = EVP_RSA_gen(2048);
+#else
 	BIGNUM *e = BN_new();
 	RSA* root_keypair = RSA_new();
 	RSA* host_keypair = RSA_new();
@@ -451,6 +455,7 @@ userpref_error_t pair_record_generate_keys_and_certs(plist_t pair_record, key_da
 
 	EVP_PKEY* host_pkey = EVP_PKEY_new();
 	EVP_PKEY_assign_RSA(host_pkey, host_keypair);
+#endif
 
 	/* generate root certificate */
 	X509* root_cert = X509_new();
@@ -561,12 +566,22 @@ userpref_error_t pair_record_generate_keys_and_certs(plist_t pair_record, key_da
 		}
 	}
 
-	RSA *pubkey = NULL;
+	EVP_PKEY *pubkey = NULL;
 	{
 		BIO *membp = BIO_new_mem_buf(public_key.data, public_key.size);
-		if (!PEM_read_bio_RSAPublicKey(membp, &pubkey, NULL, NULL)) {
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+		if (!PEM_read_bio_PUBKEY(membp, &pubkey, NULL, NULL)) {
 			debug_info("WARNING: Could not read public key");
 		}
+#else
+		RSA *rsa_pubkey = NULL;
+		if (!PEM_read_bio_RSAPublicKey(membp, &rsa_pubkey, NULL, NULL)) {
+			debug_info("WARNING: Could not read public key");
+		} else {
+			pubkey = EVP_PKEY_new();
+			EVP_PKEY_assign_RSA(pubkey, rsa_pubkey);
+		}
+#endif
 		BIO_free(membp);
 	}
 
@@ -588,10 +603,7 @@ userpref_error_t pair_record_generate_keys_and_certs(plist_t pair_record, key_da
 		X509_set1_notAfter(dev_cert, asn1time);
 		ASN1_TIME_free(asn1time);
 
-		EVP_PKEY* pkey = EVP_PKEY_new();
-		EVP_PKEY_assign_RSA(pkey, pubkey);
-		X509_set_pubkey(dev_cert, pkey);
-		EVP_PKEY_free(pkey);
+		X509_set_pubkey(dev_cert, pubkey);
 
 		X509_add_ext_helper(dev_cert, NID_subject_key_identifier, (char*)"hash");
 		X509_add_ext_helper(dev_cert, NID_key_usage, (char*)"critical,digitalSignature,keyEncipherment");
@@ -615,9 +627,9 @@ userpref_error_t pair_record_generate_keys_and_certs(plist_t pair_record, key_da
 		}
 	}
 
-	X509V3_EXT_cleanup();
 	X509_free(dev_cert);
 
+	EVP_PKEY_free(pubkey);
 	EVP_PKEY_free(root_pkey);
 	EVP_PKEY_free(host_pkey);
 

@@ -30,9 +30,13 @@
 #include <errno.h>
 #include <time.h>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
 #endif
 
 #include <usbmuxd.h>
@@ -120,32 +124,32 @@ static void id_function(CRYPTO_THREADID *thread)
 #endif
 #endif /* HAVE_OPENSSL */
 
-static void internal_idevice_init(void)
-{
-#if defined(HAVE_OPENSSL)
-#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
-	int i;
-	SSL_library_init();
+// Reference: https://stackoverflow.com/a/2390626/1806760
+// Initializer/finalizer sample for MSVC and GCC/Clang.
+// 2010-2016 Joe Lowe. Released into the public domain.
 
-	mutex_buf = malloc(CRYPTO_num_locks() * sizeof(mutex_t));
-	if (!mutex_buf)
-		return;
-	for (i = 0; i < CRYPTO_num_locks(); i++)
-		mutex_init(&mutex_buf[i]);
-
-#if OPENSSL_VERSION_NUMBER < 0x10000000L
-	CRYPTO_set_id_callback(id_function);
+#ifdef __cplusplus
+    #define INITIALIZER(f) \
+        static void f(void); \
+        struct f##_t_ { f##_t_(void) { f(); } }; static f##_t_ f##_; \
+        static void f(void)
+#elif defined(_MSC_VER)
+    #pragma section(".CRT$XCU",read)
+    #define INITIALIZER2_(f,p) \
+        static void f(void); \
+        __declspec(allocate(".CRT$XCU")) void (*f##_)(void) = f; \
+        __pragma(comment(linker,"/include:" p #f "_")) \
+        static void f(void)
+    #ifdef _WIN64
+        #define INITIALIZER(f) INITIALIZER2_(f,"")
+    #else
+        #define INITIALIZER(f) INITIALIZER2_(f,"_")
+    #endif
 #else
-	CRYPTO_THREADID_set_callback(id_function);
+    #define INITIALIZER(f) \
+        static void f(void) __attribute__((__constructor__)); \
+        static void f(void)
 #endif
-	CRYPTO_set_locking_callback(locking_function);
-#endif
-#elif defined(HAVE_GNUTLS)
-	gnutls_global_init();
-#elif defined(HAVE_MBEDTLS)
-	// NO-OP
-#endif
-}
 
 static void internal_idevice_deinit(void)
 {
@@ -177,43 +181,41 @@ static void internal_idevice_deinit(void)
 #endif
 }
 
-static thread_once_t init_once = THREAD_ONCE_INIT;
-static thread_once_t deinit_once = THREAD_ONCE_INIT;
-
-#ifndef HAVE_ATTRIBUTE_CONSTRUCTOR
-  #if defined(__llvm__) || defined(__GNUC__)
-    #define HAVE_ATTRIBUTE_CONSTRUCTOR
-  #endif
-#endif
-
-#ifdef HAVE_ATTRIBUTE_CONSTRUCTOR
-static void __attribute__((constructor)) libimobiledevice_initialize(void)
+INITIALIZER(internal_idevice_init)
 {
-	thread_once(&init_once, internal_idevice_init);
-}
+#if defined(HAVE_OPENSSL)
+#if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
+	int i;
+	SSL_library_init();
 
-static void __attribute__((destructor)) libimobiledevice_deinitialize(void)
-{
-	thread_once(&deinit_once, internal_idevice_deinit);
-}
-#elif defined(WIN32)
-BOOL WINAPI DllMain(HINSTANCE hModule, DWORD dwReason, LPVOID lpReserved)
-{
-	switch (dwReason) {
-	case DLL_PROCESS_ATTACH:
-		thread_once(&init_once,	internal_idevice_init);
-		break;
-	case DLL_PROCESS_DETACH:
-		thread_once(&deinit_once, internal_idevice_deinit);
-		break;
-	default:
-		break;
-	}
-	return 1;
-}
+	mutex_buf = malloc(CRYPTO_num_locks() * sizeof(mutex_t));
+	if (!mutex_buf)
+		return;
+	for (i = 0; i < CRYPTO_num_locks(); i++)
+		mutex_init(&mutex_buf[i]);
+
+#if OPENSSL_VERSION_NUMBER < 0x10000000L
+	CRYPTO_set_id_callback(id_function);
 #else
-#warning No compiler support for constructor/destructor attributes, some features might not be available.
+	CRYPTO_THREADID_set_callback(id_function);
 #endif
+	CRYPTO_set_locking_callback(locking_function);
+#endif
+#elif defined(HAVE_GNUTLS)
+	gnutls_global_init();
+#elif defined(HAVE_MBEDTLS)
+	// NO-OP
+#endif
+	atexit(internal_idevice_deinit);
+}
+
+const char* libimobiledevice_version()
+{
+#ifndef PACKAGE_VERSION
+#error PACKAGE_VERSION is not defined!
+#endif
+	return PACKAGE_VERSION;
+}
 
 struct idevice_subscription_context {
 	idevice_event_cb_t callback;
@@ -244,7 +246,7 @@ static void usbmux_event_cb(const usbmuxd_event_t *event, void *user_data)
 	}
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_events_subscribe(idevice_subscription_context_t *context, idevice_event_cb_t callback, void *user_data)
+idevice_error_t idevice_events_subscribe(idevice_subscription_context_t *context, idevice_event_cb_t callback, void *user_data)
 {
 	if (!context || !callback) {
 		return IDEVICE_E_INVALID_ARG;
@@ -266,7 +268,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_events_subscribe(idevice_subscripti
 	return IDEVICE_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_events_unsubscribe(idevice_subscription_context_t context)
+idevice_error_t idevice_events_unsubscribe(idevice_subscription_context_t context)
 {
 	if (!context) {
 		return IDEVICE_E_INVALID_ARG;
@@ -283,7 +285,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_events_unsubscribe(idevice_subscrip
 	return IDEVICE_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_event_subscribe(idevice_event_cb_t callback, void *user_data)
+idevice_error_t idevice_event_subscribe(idevice_event_cb_t callback, void *user_data)
 {
 	if (event_ctx) {
 		idevice_events_unsubscribe(event_ctx);
@@ -291,7 +293,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_event_subscribe(idevice_event_cb_t 
 	return idevice_events_subscribe(&event_ctx, callback, user_data);
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_event_unsubscribe(void)
+idevice_error_t idevice_event_unsubscribe(void)
 {
 	if (!event_ctx) {
 		return IDEVICE_E_SUCCESS;
@@ -300,7 +302,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_event_unsubscribe(void)
 	return idevice_events_unsubscribe(event_ctx);
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_get_device_list_extended(idevice_info_t **devices, int *count)
+idevice_error_t idevice_get_device_list_extended(idevice_info_t **devices, int *count)
 {
 	usbmuxd_device_info_t *dev_list;
 
@@ -324,7 +326,21 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_get_device_list_extended(idevice_in
 			newlist[newcount]->conn_data = NULL;
 		} else if (dev_list[i].conn_type == CONNECTION_TYPE_NETWORK) {
 			newlist[newcount]->conn_type = CONNECTION_NETWORK;
-			size_t addrlen = ((uint8_t*)dev_list[i].conn_data)[0];
+			struct sockaddr* saddr = (struct sockaddr*)(dev_list[i].conn_data);
+			size_t addrlen = 0;
+			switch (saddr->sa_family) {
+				case AF_INET:
+					addrlen = sizeof(struct sockaddr_in);
+					break;
+#ifdef AF_INET6
+				case AF_INET6:
+					addrlen = sizeof(struct sockaddr_in6);
+					break;
+#endif
+				default:
+					debug_info("Unsupported address family 0x%02x\n", saddr->sa_family);
+					continue;
+			}
 			newlist[newcount]->conn_data = malloc(addrlen);
 			memcpy(newlist[newcount]->conn_data, dev_list[i].conn_data, addrlen);
 		}
@@ -341,7 +357,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_get_device_list_extended(idevice_in
 	return IDEVICE_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_device_list_extended_free(idevice_info_t *devices)
+idevice_error_t idevice_device_list_extended_free(idevice_info_t *devices)
 {
 	if (devices) {
 		int i = 0;
@@ -356,7 +372,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_device_list_extended_free(idevice_i
 	return IDEVICE_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_get_device_list(char ***devices, int *count)
+idevice_error_t idevice_get_device_list(char ***devices, int *count)
 {
 	usbmuxd_device_info_t *dev_list;
 
@@ -388,7 +404,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_get_device_list(char ***devices, in
 	return IDEVICE_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_device_list_free(char **devices)
+idevice_error_t idevice_device_list_free(char **devices)
 {
 	if (devices) {
 		int i = 0;
@@ -401,7 +417,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_device_list_free(char **devices)
 	return IDEVICE_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API void idevice_set_debug_level(int level)
+void idevice_set_debug_level(int level)
 {
 	internal_set_debug_level(level);
 }
@@ -426,9 +442,25 @@ static idevice_t idevice_from_mux_device(usbmuxd_device_info_t *muxdev)
 		break;
 	case CONNECTION_TYPE_NETWORK:
 		device->conn_type = CONNECTION_NETWORK;
-		size_t len = ((uint8_t*)muxdev->conn_data)[0];
-		device->conn_data = malloc(len);
-		memcpy(device->conn_data, muxdev->conn_data, len);
+		struct sockaddr* saddr = (struct sockaddr*)(muxdev->conn_data);
+		size_t addrlen = 0;
+		switch (saddr->sa_family) {
+			case AF_INET:
+				addrlen = sizeof(struct sockaddr_in);
+				break;
+#ifdef AF_INET6
+			case AF_INET6:
+				addrlen = sizeof(struct sockaddr_in6);
+				break;
+#endif
+			default:
+				debug_info("Unsupported address family 0x%02x\n", saddr->sa_family);
+				free(device->udid);
+				free(device);
+				return NULL;
+		}
+		device->conn_data = malloc(addrlen);
+		memcpy(device->conn_data, muxdev->conn_data, addrlen);
 		break;
 	default:
 		device->conn_type = 0;
@@ -438,7 +470,7 @@ static idevice_t idevice_from_mux_device(usbmuxd_device_info_t *muxdev)
 	return device;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_new_with_options(idevice_t * device, const char *udid, enum idevice_options options)
+idevice_error_t idevice_new_with_options(idevice_t * device, const char *udid, enum idevice_options options)
 {
 	usbmuxd_device_info_t muxdev;
 	int usbmux_options = 0;
@@ -462,12 +494,12 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_new_with_options(idevice_t * device
 	return IDEVICE_E_NO_DEVICE;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_new(idevice_t * device, const char *udid)
+idevice_error_t idevice_new(idevice_t * device, const char *udid)
 {
 	return idevice_new_with_options(device, udid, 0);
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_free(idevice_t device)
+idevice_error_t idevice_free(idevice_t device)
 {
 	if (!device)
 		return IDEVICE_E_INVALID_ARG;
@@ -484,7 +516,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_free(idevice_t device)
 	return ret;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connection_t *connection)
+idevice_error_t idevice_connect(idevice_t device, uint16_t port, idevice_connection_t *connection)
 {
 	if (!device) {
 		return IDEVICE_E_INVALID_ARG;
@@ -506,7 +538,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 		}
 		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
 		new_connection->type = CONNECTION_USBMUXD;
-		new_connection->data = (void*)(long)sfd;
+		new_connection->data = (void*)(uintptr_t)sfd;
 		new_connection->ssl_data = NULL;
 		new_connection->device = device;
 		new_connection->ssl_recv_timeout = (unsigned int)-1;
@@ -515,27 +547,16 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 		return IDEVICE_E_SUCCESS;
 	}
 	if (device->conn_type == CONNECTION_NETWORK) {
-		struct sockaddr_storage saddr_storage;
-		struct sockaddr* saddr = (struct sockaddr*)&saddr_storage;
-
-		/* FIXME: Improve handling of this platform/host dependent connection data */
-		if (((char*)device->conn_data)[1] == 0x02) { // AF_INET
-			saddr->sa_family = AF_INET;
-			memcpy(&saddr->sa_data[0], (char*)device->conn_data + 2, 14);
-		}
-		else if (((char*)device->conn_data)[1] == 0x1E) { // AF_INET6 (bsd)
+		struct sockaddr* saddr = (struct sockaddr*)(device->conn_data);
+		switch (saddr->sa_family) {
+			case AF_INET:
 #ifdef AF_INET6
-			saddr->sa_family = AF_INET6;
-			/* copy the address and the host dependent scope id */
-			memcpy(&saddr->sa_data[0], (char*)device->conn_data + 2, 26);
-#else
-			debug_info("ERROR: Got an IPv6 address but this system doesn't support IPv6");
-			return IDEVICE_E_UNKNOWN_ERROR;
+			case AF_INET6:
 #endif
-		}
-		else {
-			debug_info("Unsupported address family 0x%02x", ((char*)device->conn_data)[1]);
-			return IDEVICE_E_UNKNOWN_ERROR;
+				break;
+			default:
+				debug_info("Unsupported address family 0x%02x", saddr->sa_family);
+				return IDEVICE_E_UNKNOWN_ERROR;
 		}
 
 		char addrtxt[48];
@@ -562,7 +583,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 
 		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
 		new_connection->type = CONNECTION_NETWORK;
-		new_connection->data = (void*)(long)sfd;
+		new_connection->data = (void*)(uintptr_t)sfd;
 		new_connection->ssl_data = NULL;
 		new_connection->device = device;
 		new_connection->ssl_recv_timeout = (unsigned int)-1;
@@ -576,7 +597,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 	return IDEVICE_E_UNKNOWN_ERROR;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_disconnect(idevice_connection_t connection)
+idevice_error_t idevice_disconnect(idevice_connection_t connection)
 {
 	if (!connection) {
 		return IDEVICE_E_INVALID_ARG;
@@ -587,11 +608,11 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_disconnect(idevice_connection_t con
 	}
 	idevice_error_t result = IDEVICE_E_UNKNOWN_ERROR;
 	if (connection->type == CONNECTION_USBMUXD) {
-		usbmuxd_disconnect((int)(long)connection->data);
+		usbmuxd_disconnect((int)(uintptr_t)connection->data);
 		connection->data = NULL;
 		result = IDEVICE_E_SUCCESS;
 	} else if (connection->type == CONNECTION_NETWORK) {
-		socket_close((int)(long)connection->data);
+		socket_close((int)(uintptr_t)connection->data);
 		connection->data = NULL;
 		result = IDEVICE_E_SUCCESS;
 	} else {
@@ -616,7 +637,7 @@ static idevice_error_t internal_connection_send(idevice_connection_t connection,
 	if (connection->type == CONNECTION_USBMUXD) {
 		int res;
 		do {
-			res = usbmuxd_send((int)(long)connection->data, data, len, sent_bytes);
+			res = usbmuxd_send((int)(uintptr_t)connection->data, data, len, sent_bytes);
 		} while (res == -EAGAIN);
 		if (res < 0) {
 			debug_info("ERROR: usbmuxd_send returned %d (%s)", res, strerror(-res));
@@ -625,7 +646,7 @@ static idevice_error_t internal_connection_send(idevice_connection_t connection,
 		return IDEVICE_E_SUCCESS;
 	}
 	if (connection->type == CONNECTION_NETWORK) {
-		int s = socket_send((int)(long)connection->data, (void*)data, len);
+		int s = socket_send((int)(uintptr_t)connection->data, (void*)data, len);
 		if (s < 0) {
 			*sent_bytes = 0;
 			return IDEVICE_E_UNKNOWN_ERROR;
@@ -639,7 +660,7 @@ static idevice_error_t internal_connection_send(idevice_connection_t connection,
 
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_send(idevice_connection_t connection, const char *data, uint32_t len, uint32_t *sent_bytes)
+idevice_error_t idevice_connection_send(idevice_connection_t connection, const char *data, uint32_t len, uint32_t *sent_bytes)
 {
 	if (!connection || !data
 #if defined(HAVE_OPENSSL) || defined(HAVE_GNUTLS)
@@ -732,7 +753,7 @@ static idevice_error_t internal_connection_receive_timeout(idevice_connection_t 
 	}
 
 	if (connection->type == CONNECTION_USBMUXD) {
-		int conn_error = usbmuxd_recv_timeout((int)(long)connection->data, data, len, recv_bytes, timeout);
+		int conn_error = usbmuxd_recv_timeout((int)(uintptr_t)connection->data, data, len, recv_bytes, timeout);
 		idevice_error_t error = socket_recv_to_idevice_error(conn_error, len, *recv_bytes);
 		if (error == IDEVICE_E_UNKNOWN_ERROR) {
 			debug_info("ERROR: usbmuxd_recv_timeout returned %d (%s)", conn_error, strerror(-conn_error));
@@ -740,7 +761,7 @@ static idevice_error_t internal_connection_receive_timeout(idevice_connection_t 
 		return error;
 	}
 	if (connection->type == CONNECTION_NETWORK) {
-		int res = socket_receive_timeout((int)(long)connection->data, data, len, 0, timeout);
+		int res = socket_receive_timeout((int)(uintptr_t)connection->data, data, len, 0, timeout);
 		idevice_error_t error = socket_recv_to_idevice_error(res, 0, 0);
 		if (error == IDEVICE_E_SUCCESS) {
 			*recv_bytes = (uint32_t)res;
@@ -754,7 +775,7 @@ static idevice_error_t internal_connection_receive_timeout(idevice_connection_t 
 	return IDEVICE_E_UNKNOWN_ERROR;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout)
+idevice_error_t idevice_connection_receive_timeout(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes, unsigned int timeout)
 {
 	if (!connection
 #if defined(HAVE_OPENSSL) || defined(HAVE_GNUTLS)
@@ -832,7 +853,7 @@ static idevice_error_t internal_connection_receive(idevice_connection_t connecti
 	}
 
 	if (connection->type == CONNECTION_USBMUXD) {
-		int res = usbmuxd_recv((int)(long)connection->data, data, len, recv_bytes);
+		int res = usbmuxd_recv((int)(uintptr_t)connection->data, data, len, recv_bytes);
 		if (res < 0) {
 			debug_info("ERROR: usbmuxd_recv returned %d (%s)", res, strerror(-res));
 			return IDEVICE_E_UNKNOWN_ERROR;
@@ -840,7 +861,7 @@ static idevice_error_t internal_connection_receive(idevice_connection_t connecti
 		return IDEVICE_E_SUCCESS;
 	}
 	if (connection->type == CONNECTION_NETWORK) {
-		int res = socket_receive((int)(long)connection->data, data, len);
+		int res = socket_receive((int)(uintptr_t)connection->data, data, len);
 		if (res < 0) {
 			debug_info("ERROR: socket_receive returned %d (%s)", res, strerror(-res));
 			return IDEVICE_E_UNKNOWN_ERROR;
@@ -853,7 +874,7 @@ static idevice_error_t internal_connection_receive(idevice_connection_t connecti
 	return IDEVICE_E_UNKNOWN_ERROR;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes)
+idevice_error_t idevice_connection_receive(idevice_connection_t connection, char *data, uint32_t len, uint32_t *recv_bytes)
 {
 	if (!connection
 #if defined(HAVE_OPENSSL) || defined(HAVE_GNUTLS)
@@ -886,18 +907,18 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_receive(idevice_connecti
 	return internal_connection_receive(connection, data, len, recv_bytes);
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_get_fd(idevice_connection_t connection, int *fd)
+idevice_error_t idevice_connection_get_fd(idevice_connection_t connection, int *fd)
 {
 	if (!connection || !fd) {
 		return IDEVICE_E_INVALID_ARG;
 	}
 
 	if (connection->type == CONNECTION_USBMUXD) {
-		*fd = (int)(long)connection->data;
+		*fd = (int)(uintptr_t)connection->data;
 		return IDEVICE_E_SUCCESS;
 	}
 	if (connection->type == CONNECTION_NETWORK) {
-		*fd = (int)(long)connection->data;
+		*fd = (int)(uintptr_t)connection->data;
 		return IDEVICE_E_SUCCESS;
 	}
 
@@ -905,7 +926,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_get_fd(idevice_connectio
 	return IDEVICE_E_UNKNOWN_ERROR;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_get_handle(idevice_t device, uint32_t *handle)
+idevice_error_t idevice_get_handle(idevice_t device, uint32_t *handle)
 {
 	if (!device || !handle)
 		return IDEVICE_E_INVALID_ARG;
@@ -914,7 +935,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_get_handle(idevice_t device, uint32
 	return IDEVICE_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_get_udid(idevice_t device, char **udid)
+idevice_error_t idevice_get_udid(idevice_t device, char **udid)
 {
 	if (!device || !udid)
 		return IDEVICE_E_INVALID_ARG;
@@ -1034,18 +1055,33 @@ static void internal_ssl_cleanup(ssl_data_t ssl_data)
 }
 
 #ifdef HAVE_OPENSSL
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+static long ssl_idevice_bio_callback(BIO *b, int oper, const char *argp, size_t len, int argi, long argl, int retvalue, size_t *processed)
+#else
 static long ssl_idevice_bio_callback(BIO *b, int oper, const char *argp, int argi, long argl, long retvalue)
+#endif
 {
+	ssize_t bytes = 0;
 	idevice_connection_t conn = (idevice_connection_t)BIO_get_callback_arg(b);
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
 	size_t len = (size_t)argi;
+	size_t *processed = (size_t*)&bytes;
+#endif
 	switch (oper) {
 	case (BIO_CB_READ|BIO_CB_RETURN):
-		return argp ? (long)internal_ssl_read(conn, (char *)argp, len) : 0;
+		if (argp) {
+			bytes = internal_ssl_read(conn, (char *)argp, len);
+			*processed = bytes;
+			return (long)bytes;
+		}
+		return 0;
 	case (BIO_CB_PUTS|BIO_CB_RETURN):
 		len = strlen(argp);
 		// fallthrough
 	case (BIO_CB_WRITE|BIO_CB_RETURN):
-		return (long)internal_ssl_write(conn, argp, len);
+		bytes = internal_ssl_write(conn, argp, len);
+		*processed = bytes;
+		return (long)bytes;
 	default:
 		return retvalue;
 	}
@@ -1056,7 +1092,11 @@ static BIO *ssl_idevice_bio_new(idevice_connection_t conn)
 	BIO *b = BIO_new(BIO_s_null());
 	if (!b) return NULL;
 	BIO_set_callback_arg(b, (char *)conn);
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	BIO_set_callback_ex(b, ssl_idevice_bio_callback);
+#else
 	BIO_set_callback(b, ssl_idevice_bio_callback);
+#endif
 	return b;
 }
 
@@ -1144,7 +1184,7 @@ static int _mbedtls_f_rng(void* p_rng, unsigned char* buf, size_t len)
 }
 #endif
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_connection_t connection)
+idevice_error_t idevice_connection_enable_ssl(idevice_connection_t connection)
 {
 	if (!connection || connection->ssl_data)
 		return IDEVICE_E_INVALID_ARG;
@@ -1181,7 +1221,8 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 		return ret;
 	}
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER) || \
+	(defined(LIBRESSL_VERSION_NUMBER) && (LIBRESSL_VERSION_NUMBER >= 0x3060000fL))
 	SSL_CTX_set_security_level(ssl_ctx, 0);
 #endif
 
@@ -1190,30 +1231,51 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 	/* force use of TLSv1 for older devices */
 	if (connection->device->version < DEVICE_VERSION(10,0,0)) {
 #ifdef SSL_OP_NO_TLSv1_1
-		long opts = SSL_CTX_get_options(ssl_ctx);
-		opts |= SSL_OP_NO_TLSv1_1;
+		SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_TLSv1_1);
+#endif
 #ifdef SSL_OP_NO_TLSv1_2
-		opts |= SSL_OP_NO_TLSv1_2;
+		SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_TLSv1_2);
 #endif
 #ifdef SSL_OP_NO_TLSv1_3
-		opts |= SSL_OP_NO_TLSv1_3;
-#endif
-		SSL_CTX_set_options(ssl_ctx, opts);
+		SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_TLSv1_3);
 #endif
 	}
 #else
 	SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_VERSION);
 	if (connection->device->version < DEVICE_VERSION(10,0,0)) {
 		SSL_CTX_set_max_proto_version(ssl_ctx, TLS1_VERSION);
+		if (connection->device->version == 0) {
+			/*
+				iOS 1 doesn't understand TLS1_VERSION, it can only speak SSL3_VERSION.
+				However, modern OpenSSL is usually compiled without SSLv3 support.
+				So if we set min_proto_version to SSL3_VERSION on an OpenSSL instance which doesn't support it,
+				it will just ignore min_proto_version altogether and fall back to an even higher version.
+				To avoid accidentally breaking iOS 2.0+, we set min version to 0 instead.
+				Here is what documentation says:
+					Setting the minimum or maximum version to 0,
+					will enable protocol versions down to the lowest version,
+					or up to the highest version supported by the library, respectively.
+			*/
+			SSL_CTX_set_min_proto_version(ssl_ctx, 0);
+		}
 	}
 #endif
-#if (OPENSSL_VERSION_MAJOR >= 3) && defined(SSL_OP_IGNORE_UNEXPECTED_EOF)
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#if defined(SSL_OP_IGNORE_UNEXPECTED_EOF)
 	/*
 	 * For OpenSSL 3 and later, mark close_notify alerts as optional.
 	 * For prior versions of OpenSSL we check for SSL_ERROR_SYSCALL when
 	 * reading instead (this error changes to SSL_ERROR_SSL in OpenSSL 3).
 	 */
 	SSL_CTX_set_options(ssl_ctx, SSL_OP_IGNORE_UNEXPECTED_EOF);
+#endif
+#if defined(SSL_OP_LEGACY_SERVER_CONNECT)
+	/*
+	 * Without setting SSL_OP_LEGACY_SERVER_CONNECT, OpenSSL 3 fails with
+	 * error "unsafe legacy renegotiation disabled" when talking to iOS 5
+	 */
+	SSL_CTX_set_options(ssl_ctx, SSL_OP_LEGACY_SERVER_CONNECT);
+#endif
 #endif
 
 	BIO* membp;
@@ -1227,6 +1289,16 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 	X509_free(rootCert);
 	free(root_cert.data);
 
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	EVP_PKEY* rootPrivKey = NULL;
+	membp = BIO_new_mem_buf(root_privkey.data, root_privkey.size);
+	PEM_read_bio_PrivateKey(membp, &rootPrivKey, NULL, NULL);
+	BIO_free(membp);
+	if (SSL_CTX_use_PrivateKey(ssl_ctx, rootPrivKey) != 1) {
+		debug_info("WARNING: Could not load RootPrivateKey");
+	}
+	EVP_PKEY_free(rootPrivKey);
+#else
 	RSA* rootPrivKey = NULL;
 	membp = BIO_new_mem_buf(root_privkey.data, root_privkey.size);
 	PEM_read_bio_RSAPrivateKey(membp, &rootPrivKey, NULL, NULL);
@@ -1235,6 +1307,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 		debug_info("WARNING: Could not load RootPrivateKey");
 	}
 	RSA_free(rootPrivKey);
+#endif
 	free(root_privkey.data);
 
 	SSL *ssl = SSL_new(ssl_ctx);
@@ -1255,7 +1328,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 		if (ssl_error == 0 || ssl_error != SSL_ERROR_WANT_READ) {
 			break;
 		}
-#ifdef WIN32
+#ifdef _WIN32
 		Sleep(100);
 #else
 		struct timespec ts = { 0, 100000000 };
@@ -1414,12 +1487,12 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 	return ret;
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_disable_ssl(idevice_connection_t connection)
+idevice_error_t idevice_connection_disable_ssl(idevice_connection_t connection)
 {
 	return idevice_connection_disable_bypass_ssl(connection, 0);
 }
 
-LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_disable_bypass_ssl(idevice_connection_t connection, uint8_t sslBypass)
+idevice_error_t idevice_connection_disable_bypass_ssl(idevice_connection_t connection, uint8_t sslBypass)
 {
 	if (!connection)
 		return IDEVICE_E_INVALID_ARG;

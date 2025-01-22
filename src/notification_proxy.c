@@ -24,14 +24,19 @@
 #endif
 #include <string.h>
 #include <stdlib.h>
+
+#ifndef _MSC_VER
 #include <unistd.h>
+#endif
+
 #include <plist/plist.h>
 
 #include "notification_proxy.h"
 #include "property_list_service.h"
 #include "common/debug.h"
 
-#ifdef WIN32
+#ifdef _WIN32
+#include <windows.h>
 #define sleep(x) Sleep(x*1000)
 #endif
 
@@ -89,7 +94,7 @@ static np_error_t np_error(property_list_service_error_t err)
 	return NP_E_UNKNOWN_ERROR;
 }
 
-LIBIMOBILEDEVICE_API np_error_t np_client_new(idevice_t device, lockdownd_service_descriptor_t service, np_client_t *client)
+np_error_t np_client_new(idevice_t device, lockdownd_service_descriptor_t service, np_client_t *client)
 {
 	property_list_service_client_t plistclient = NULL;
 	np_error_t err = np_error(property_list_service_client_new(device, service, &plistclient));
@@ -107,14 +112,14 @@ LIBIMOBILEDEVICE_API np_error_t np_client_new(idevice_t device, lockdownd_servic
 	return NP_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API np_error_t np_client_start_service(idevice_t device, np_client_t* client, const char* label)
+np_error_t np_client_start_service(idevice_t device, np_client_t* client, const char* label)
 {
-	np_error_t err = NP_E_UNKNOWN_ERROR;
+	int32_t err = NP_E_UNKNOWN_ERROR;
 	service_client_factory_start_service(device, NP_SERVICE_NAME, (void**)client, label, SERVICE_CONSTRUCTOR(np_client_new), &err);
 	return err;
 }
 
-LIBIMOBILEDEVICE_API np_error_t np_client_free(np_client_t client)
+np_error_t np_client_free(np_client_t client)
 {
 	plist_t dict;
 	property_list_service_client_t parent;
@@ -168,7 +173,7 @@ LIBIMOBILEDEVICE_API np_error_t np_client_free(np_client_t client)
 	return NP_E_SUCCESS;
 }
 
-LIBIMOBILEDEVICE_API np_error_t np_post_notification(np_client_t client, const char *notification)
+np_error_t np_post_notification(np_client_t client, const char *notification)
 {
 	if (!client || !notification) {
 		return NP_E_INVALID_ARG;
@@ -204,7 +209,7 @@ static np_error_t internal_np_observe_notification(np_client_t client, const cha
 	return res;
 }
 
-LIBIMOBILEDEVICE_API np_error_t np_observe_notification( np_client_t client, const char *notification )
+np_error_t np_observe_notification( np_client_t client, const char *notification )
 {
 	if (!client || !notification) {
 		return NP_E_INVALID_ARG;
@@ -215,7 +220,7 @@ LIBIMOBILEDEVICE_API np_error_t np_observe_notification( np_client_t client, con
 	return res;
 }
 
-LIBIMOBILEDEVICE_API np_error_t np_observe_notifications(np_client_t client, const char **notification_spec)
+np_error_t np_observe_notifications(np_client_t client, const char **notification_spec)
 {
 	int i = 0;
 	np_error_t res = NP_E_UNKNOWN_ERROR;
@@ -346,7 +351,7 @@ void* np_notifier( void* arg )
 	return NULL;
 }
 
-LIBIMOBILEDEVICE_API np_error_t np_set_notify_callback( np_client_t client, np_notify_cb_t notify_cb, void *user_data )
+np_error_t np_set_notify_callback( np_client_t client, np_notify_cb_t notify_cb, void *user_data )
 {
 	if (!client)
 		return NP_E_INVALID_ARG;

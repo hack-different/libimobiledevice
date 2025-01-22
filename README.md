@@ -18,7 +18,7 @@ Some key features are:
 - **Implementation**: Object oriented architecture and service abstraction layer
 - **Cross-Platform:** Tested on Linux, macOS, Windows and Android platforms
 - **Utilities**: Provides various command-line utilities for device services
-- **SSL**: Allows choosing between OpenSSL or GnuTLS to handle SSL communication
+- **SSL**: Allows choosing between OpenSSL, GnuTLS, or MbedTLS to handle SSL communication
 - **Network**: Supports network connections with "WiFi sync" enabled devices
 - **Python:** Provides Cython based bindings for Python
 
@@ -66,9 +66,13 @@ sudo apt-get install \
 	libplist-dev \
 	libusbmuxd-dev \
 	libimobiledevice-glue-dev \
+	libtatsu-dev \
 	libssl-dev \
 	usbmuxd
 ```
+NOTE: [libtatsu](https://github.com/libimobiledevice/libtatsu) (and thus `libtatsu-dev`)
+is a new library that was just published recently, you have to
+[build it from source](https://github.com/libimobiledevice/libtatsu?tab=readme-ov-file#building).
 
 If you want to optionally build the documentation or Python bindings use:
 ```shell
@@ -144,6 +148,7 @@ The library bundles the following command-line utilities in the tools directory:
 | `idevicescreenshot`        | Gets a screenshot from the connected device                        |
 | `idevicesetlocation`       | Simulate location on device                                        |
 | `idevicesyslog`            | Relay syslog of a connected device                                 |
+| `afcclient`                | Interact with device filesystem via AFC/HouseArrest                |
 
 Please consult the usage information or manual pages of each utility for a
 documentation of available command line options and usage examples like this:
@@ -174,8 +179,8 @@ We are still working on the guidelines so bear with us!
 ## Links
 
 * Homepage: https://libimobiledevice.org/
-* Repository: https://git.libimobiledevice.org/libimobiledevice.git
-* Repository (Mirror): https://github.com/libimobiledevice/libimobiledevice.git
+* Repository: https://github.com/libimobiledevice/libimobiledevice.git
+* Repository (Mirror): https://git.libimobiledevice.org/libimobiledevice.git
 * Issue Tracker: https://github.com/libimobiledevice/libimobiledevice/issues
 * Mailing List: https://lists.libimobiledevice.org/mailman/listinfo/libimobiledevice-devel
 * Twitter: https://twitter.com/libimobiledev
@@ -193,4 +198,4 @@ iPadOS, tvOS, watchOS, and macOS are trademarks of Apple Inc.
 This project is an independent software and has not been authorized, sponsored,
 or otherwise approved by Apple Inc.
 
-README Updated on: 2022-04-04
+README Updated on: 2024-10-22

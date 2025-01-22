@@ -47,13 +47,14 @@
 #include <libimobiledevice/sbservices.h>
 #include <libimobiledevice/diagnostics_relay.h>
 #include <libimobiledevice-glue/utils.h>
+#include <plist/plist.h>
 
 #include <endianness.h>
 
 #define LOCK_ATTEMPTS 50
 #define LOCK_WAIT 200000
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
 #define sleep(x) Sleep(x*1000)
@@ -73,6 +74,7 @@
 
 static int verbose = 1;
 static int quit_flag = 0;
+static int passcode_requested = 0;
 
 #define PRINT_VERBOSE(min_level, ...) if (verbose >= min_level) { printf(__VA_ARGS__); };
 
@@ -114,6 +116,10 @@ static void notify_cb(const char *notification, void *userdata)
 		quit_flag++;
 	} else if (!strcmp(notification, NP_BACKUP_DOMAIN_CHANGED)) {
 		backup_domain_changed = 1;
+	} else if (!strcmp(notification, "com.apple.LocalAuthentication.ui.presented")) {
+		passcode_requested = 1;
+	} else if (!strcmp(notification, "com.apple.LocalAuthentication.ui.dismissed")) {
+		passcode_requested = 0;
 	} else {
 		PRINT_VERBOSE(1, "Unhandled notification '%s' (TODO: implement)\n", notification);
 	}
@@ -172,7 +178,7 @@ static void mobilebackup_afc_get_file_contents(afc_client_t afc, const char *fil
 
 static int __mkdir(const char* path, int mode)
 {
-#ifdef WIN32
+#ifdef _WIN32
 	return mkdir(path);
 #else
 	return mkdir(path, mode);
@@ -201,7 +207,7 @@ static int mkdir_with_parents(const char *dir, int mode)
 	return res;
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 static int win32err_to_errno(int err_value)
 {
 	switch (err_value) {
@@ -218,7 +224,7 @@ static int win32err_to_errno(int err_value)
 static int remove_file(const char* path)
 {
 	int e = 0;
-#ifdef WIN32
+#ifdef _WIN32
 	if (!DeleteFile(path)) {
 		e = win32err_to_errno(GetLastError());
 	}
@@ -233,7 +239,7 @@ static int remove_file(const char* path)
 static int remove_directory(const char* path)
 {
 	int e = 0;
-#ifdef WIN32
+#ifdef _WIN32
 	if (!RemoveDirectory(path)) {
 		e = win32err_to_errno(GetLastError());
 	}
@@ -606,7 +612,7 @@ static int mb2_status_check_snapshot_state(const char *path, const char *udid, c
 	plist_t status_plist = NULL;
 	char *file_path = string_build_path(path, udid, "Status.plist", NULL);
 
-	plist_read_from_filename(&status_plist, file_path);
+	plist_read_from_file(file_path, &status_plist, NULL);
 	free(file_path);
 	if (!status_plist) {
 		printf("Could not read Status.plist!\n");
@@ -767,7 +773,7 @@ static int mb2_handle_send_file(mobilebackup2_client_t mobilebackup2, const char
 	uint32_t bytes = 0;
 	char *localfile = string_build_path(backup_dir, path, NULL);
 	char buf[32768];
-#ifdef WIN32
+#ifdef _WIN32
 	struct _stati64 fst;
 #else
 	struct stat fst;
@@ -778,7 +784,7 @@ static int mb2_handle_send_file(mobilebackup2_client_t mobilebackup2, const char
 	int errcode = -1;
 	int result = -1;
 	uint32_t length;
-#ifdef WIN32
+#ifdef _WIN32
 	uint64_t total;
 	uint64_t sent;
 #else
@@ -809,7 +815,7 @@ static int mb2_handle_send_file(mobilebackup2_client_t mobilebackup2, const char
 		goto leave_proto_err;
 	}
 
-#ifdef WIN32
+#ifdef _WIN32
 	if (_stati64(localfile, &fst) < 0)
 #else
 	if (stat(localfile, &fst) < 0)
@@ -1342,7 +1348,7 @@ static void mb2_copy_directory_by_path(const char *src, const char *dst)
 	}
 }
 
-#ifdef WIN32
+#ifdef _WIN32
 #define BS_CC '\b'
 #define my_getch getch
 #else
@@ -1529,7 +1535,7 @@ int main(int argc, char *argv[])
 	/* we need to exit cleanly on running backups and restores or we cause havok */
 	signal(SIGINT, clean_exit);
 	signal(SIGTERM, clean_exit);
-#ifndef WIN32
+#ifndef _WIN32
 	signal(SIGQUIT, clean_exit);
 	signal(SIGPIPE, SIG_IGN);
 #endif
@@ -1555,6 +1561,7 @@ int main(int argc, char *argv[])
 				return 2;
 			}
 			source_udid = strdup(optarg);
+			break;
 		case 'i':
 			interactive_mode = 1;
 			break;
@@ -1779,7 +1786,7 @@ int main(int argc, char *argv[])
 				free(info_path);
 			}
 			plist_t manifest_plist = NULL;
-			plist_read_from_filename(&manifest_plist, manifest_path);
+			plist_read_from_file(manifest_path, &manifest_plist, NULL);
 			if (!manifest_plist) {
 				idevice_free(device);
 				free(info_path);
@@ -1865,11 +1872,13 @@ int main(int argc, char *argv[])
 	if ((ldret == LOCKDOWN_E_SUCCESS) && service && service->port) {
 		np_client_new(device, service, &np);
 		np_set_notify_callback(np, notify_cb, NULL);
-		const char *noties[5] = {
+		const char *noties[7] = {
 			NP_SYNC_CANCEL_REQUEST,
 			NP_SYNC_SUSPEND_REQUEST,
 			NP_SYNC_RESUME_REQUEST,
 			NP_BACKUP_DOMAIN_CHANGED,
+			"com.apple.LocalAuthentication.ui.presented",
+			"com.apple.LocalAuthentication.ui.dismissed",
 			NULL
 		};
 		np_observe_notifications(np, noties);
@@ -1935,7 +1944,7 @@ int main(int argc, char *argv[])
 		/* verify existing Info.plist */
 		if (info_path && (stat(info_path, &st) == 0) && cmd != CMD_CLOUD) {
 			PRINT_VERBOSE(1, "Reading Info.plist from backup.\n");
-			plist_read_from_filename(&info_plist, info_path);
+			plist_read_from_file(info_path, &info_plist, NULL);
 
 			if (!info_plist) {
 				printf("Could not read Info.plist\n");
@@ -2029,7 +2038,7 @@ checkpoint:
 				cmd = CMD_LEAVE;
 			}
 			remove_file(info_path);
-			plist_write_to_filename(info_plist, info_path, PLIST_FORMAT_XML);
+			plist_write_to_file(info_plist, info_path, PLIST_FORMAT_XML, 0);
 			free(info_path);
 
 			plist_free(info_plist);
@@ -2055,6 +2064,16 @@ checkpoint:
 					PRINT_VERBOSE(1, "Full backup mode.\n");
 				}	else {
 					PRINT_VERBOSE(1, "Incremental backup mode.\n");
+				}
+				if (device_version >= DEVICE_VERSION(16,1,0)) {
+					/* let's wait 2 second to see if the device passcode is requested */
+					int retries = 20;
+					while (retries-- > 0 && !passcode_requested) {
+						usleep(100000);
+					}
+					if (passcode_requested) {
+						printf("*** Waiting for passcode to be entered on the device ***\n");
+					}
 				}
 			} else {
 				if (err == MOBILEBACKUP2_E_BAD_VERSION) {
@@ -2305,7 +2324,7 @@ checkpoint:
 					/* device wants to know how much disk space is available on the computer */
 					uint64_t freespace = 0;
 					int res = -1;
-#ifdef WIN32
+#ifdef _WIN32
 					if (GetDiskFreeSpaceEx(backup_directory, (PULARGE_INTEGER)&freespace, NULL, NULL)) {
 						res = 0;
 					}
@@ -2314,7 +2333,7 @@ checkpoint:
 					memset(&fs, '\0', sizeof(fs));
 					res = statvfs(backup_directory, &fs);
 					if (res == 0) {
-						freespace = (uint64_t)fs.f_bavail * (uint64_t)fs.f_bsize;
+						freespace = (uint64_t)fs.f_bavail * (uint64_t)fs.f_frsize;
 					}
 #endif
 					plist_t freespace_item = plist_new_uint(freespace);

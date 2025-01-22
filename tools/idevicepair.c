@@ -32,7 +32,7 @@
 #include <getopt.h>
 #include <ctype.h>
 #include <unistd.h>
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
 #else
@@ -41,7 +41,6 @@
 #endif
 
 #include "common/userpref.h"
-#include <libimobiledevice-glue/utils.h>
 
 #include <libimobiledevice/libimobiledevice.h>
 #include <libimobiledevice/lockdown.h>
@@ -51,7 +50,7 @@ static char *udid = NULL;
 
 #ifdef HAVE_WIRELESS_PAIRING
 
-#ifdef WIN32
+#ifdef _WIN32
 #define BS_CC '\b'
 #define my_getch getch
 #else
@@ -104,7 +103,7 @@ static void pairing_cb(lockdownd_cu_pairing_cb_type_t cb_type, void *user_data, 
 		printf("\n");
 	} else if (cb_type == LOCKDOWN_CU_PAIRING_DEVICE_INFO) {
 		printf("Device info:\n");
-		plist_print_to_stream_with_indentation((plist_t)data_ptr, stdout, 2);
+		plist_write_to_stream((plist_t)data_ptr, stdout, PLIST_FORMAT_LIMD, PLIST_OPT_INDENT | PLIST_OPT_INDENT_BY(2));
 	} else if (cb_type == LOCKDOWN_CU_PAIRING_ERROR) {
 		printf("ERROR: %s\n", (data_ptr) ? (char*)data_ptr : "(unknown)");
 	}
@@ -257,7 +256,7 @@ int main(int argc, char **argv)
 				goto leave;
 			}
 			if (*optarg == '@') {
-				plist_read_from_filename(&host_info_plist, optarg+1);
+				plist_read_from_file(optarg+1, &host_info_plist, NULL);
 				if (!host_info_plist) {
 					fprintf(stderr, "ERROR: Could not read from file '%s'\n", optarg+1);
 					result = EXIT_FAILURE;
@@ -294,7 +293,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-#ifndef WIN32
+#ifndef _WIN32
 	signal(SIGPIPE, SIG_IGN);
 #endif
 

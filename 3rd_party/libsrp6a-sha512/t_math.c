@@ -39,10 +39,13 @@ typedef BIGNUM * BigInteger;
 typedef BN_CTX * BigIntegerCtx;
 typedef BN_MONT_CTX * BigIntegerModAccel;
 #include <limits.h>
-# ifdef OPENSSL_ENGINE
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+# ifndef OPENSSL_NO_ENGINE
+#  define OPENSSL_ENGINE
 #  include "openssl/engine.h"
 static ENGINE * default_engine = NULL;
 # endif /* OPENSSL_ENGINE */
+#endif
 typedef int (*modexp_meth)(BIGNUM *r, const BIGNUM *a, const BIGNUM *p,
 			   const BIGNUM *m, BN_CTX *ctx, BN_MONT_CTX *mctx);
 static modexp_meth default_modexp = NULL;
@@ -98,8 +101,7 @@ typedef void * BigIntegerModAccel;
 /* Math library interface stubs */
 
 BigInteger
-BigIntegerFromInt(n)
-     unsigned int n;
+BigIntegerFromInt(unsigned int n)
 {
 #ifdef OPENSSL
   BIGNUM * a = BN_new();
@@ -135,9 +137,7 @@ BigIntegerFromInt(n)
 }
 
 BigInteger
-BigIntegerFromBytes(bytes, length)
-     const unsigned char * bytes;
-     int length;
+BigIntegerFromBytes(const unsigned char *bytes, int length)
 {
 #ifdef OPENSSL
   BIGNUM * a = BN_new();
@@ -205,10 +205,7 @@ BigIntegerFromBytes(bytes, length)
 }
 
 int
-BigIntegerToBytes(src, dest, destlen)
-     BigInteger src;
-     unsigned char * dest;
-     int destlen;
+BigIntegerToBytes(BigInteger src, unsigned char *dest, int destlen)
 {
 #ifdef OPENSSL
   return BN_bn2bin(src, dest);
@@ -289,10 +286,7 @@ BigIntegerToCstrEx(BigInteger x, cstr * out, int len)
 }
 
 BigIntegerResult
-BigIntegerToHex(src, dest, destlen)
-     BigInteger src;
-     char * dest;
-     int destlen;
+BigIntegerToHex(BigInteger src, char *dest, int destlen)
 {
 #ifdef OPENSSL
   strncpy(dest, BN_bn2hex(src), destlen);
@@ -316,11 +310,7 @@ static char b64table[] =
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz./";
 
 BigIntegerResult
-BigIntegerToString(src, dest, destlen, radix)
-     BigInteger src;
-     char * dest;
-     int destlen;
-     unsigned int radix;
+BigIntegerToString(BigInteger src, char *dest, int destlen, unsigned int radix)
 {
   BigInteger t = BigIntegerFromInt(0);
   char * p = dest;
@@ -344,8 +334,7 @@ BigIntegerToString(src, dest, destlen, radix)
 }
 
 int
-BigIntegerBitLen(b)
-     BigInteger b;
+BigIntegerBitLen(BigInteger b)
 {
 #ifdef OPENSSL
   return BN_num_bits(b);
@@ -363,8 +352,7 @@ BigIntegerBitLen(b)
 }
 
 int
-BigIntegerCmp(c1, c2)
-     BigInteger c1, c2;
+BigIntegerCmp(BigInteger c1, BigInteger c2)
 {
 #ifdef OPENSSL
   return BN_cmp(c1, c2);
@@ -382,9 +370,7 @@ BigIntegerCmp(c1, c2)
 }
 
 int
-BigIntegerCmpInt(c1, c2)
-     BigInteger c1;
-     unsigned int c2;
+BigIntegerCmpInt(BigInteger c1, unsigned int c2)
 {
 #ifdef OPENSSL
   BigInteger bc2 = BigIntegerFromInt(c2);
@@ -413,9 +399,7 @@ BigIntegerCmpInt(c1, c2)
 }
 
 BigIntegerResult
-BigIntegerLShift(result, x, bits)
-     BigInteger result, x;
-     unsigned int bits;
+BigIntegerLShift(BigInteger result, BigInteger x, unsigned int bits)
 {
 #ifdef OPENSSL
   BN_lshift(result, x, bits);
@@ -435,8 +419,7 @@ BigIntegerLShift(result, x, bits)
 }
 
 BigIntegerResult
-BigIntegerAdd(result, a1, a2)
-     BigInteger result, a1, a2;
+BigIntegerAdd(BigInteger result, BigInteger a1, BigInteger a2)
 {
 #ifdef OPENSSL
   BN_add(result, a1, a2);
@@ -455,9 +438,7 @@ BigIntegerAdd(result, a1, a2)
 }
 
 BigIntegerResult
-BigIntegerAddInt(result, a1, a2)
-     BigInteger result, a1;
-     unsigned int a2;
+BigIntegerAddInt(BigInteger result, BigInteger a1, unsigned int a2)
 {
 #ifdef OPENSSL
   if(result != a1)
@@ -482,8 +463,7 @@ BigIntegerAddInt(result, a1, a2)
 }
 
 BigIntegerResult
-BigIntegerSub(result, s1, s2)
-     BigInteger result, s1, s2;
+BigIntegerSub(BigInteger result, BigInteger s1, BigInteger s2)
 {
 #ifdef OPENSSL
   BN_sub(result, s1, s2);
@@ -502,9 +482,7 @@ BigIntegerSub(result, s1, s2)
 }
 
 BigIntegerResult
-BigIntegerSubInt(result, s1, s2)
-     BigInteger result, s1;
-     unsigned int s2;
+BigIntegerSubInt(BigInteger result, BigInteger s1, unsigned int s2)
 {
 #ifdef OPENSSL
   if(result != s1)
@@ -529,9 +507,7 @@ BigIntegerSubInt(result, s1, s2)
 }
 
 BigIntegerResult
-BigIntegerMul(result, m1, m2, c)
-     BigInteger result, m1, m2;
-     BigIntegerCtx c;
+BigIntegerMul(BigInteger result, BigInteger m1, BigInteger m2, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   BN_CTX * ctx = NULL;
@@ -555,10 +531,7 @@ BigIntegerMul(result, m1, m2, c)
 }
 
 BigIntegerResult
-BigIntegerMulInt(result, m1, m2, c)
-     BigInteger result, m1;
-     unsigned int m2;
-     BigIntegerCtx c;
+BigIntegerMulInt(BigInteger result, BigInteger m1, unsigned int m2, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   if(result != m1)
@@ -583,10 +556,7 @@ BigIntegerMulInt(result, m1, m2, c)
 }
 
 BigIntegerResult
-BigIntegerDivInt(result, d, m, c)
-     BigInteger result, d;
-     unsigned int m;
-     BigIntegerCtx c;
+BigIntegerDivInt(BigInteger result, BigInteger d, unsigned int m, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   if(result != d)
@@ -623,9 +593,7 @@ BigIntegerDivInt(result, d, m, c)
 }
 
 BigIntegerResult
-BigIntegerMod(result, d, m, c)
-     BigInteger result, d, m;
-     BigIntegerCtx c;
+BigIntegerMod(BigInteger result, BigInteger d, BigInteger m, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   BN_CTX * ctx = NULL;
@@ -649,10 +617,7 @@ BigIntegerMod(result, d, m, c)
 }
 
 unsigned int
-BigIntegerModInt(d, m, c)
-     BigInteger d;
-     unsigned int m;
-     BigIntegerCtx c;
+BigIntegerModInt(BigInteger d, unsigned int m, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   return BN_mod_word(d, m);
@@ -710,9 +675,7 @@ BigIntegerModInt(d, m, c)
 }
 
 BigIntegerResult
-BigIntegerModMul(r, m1, m2, modulus, c)
-     BigInteger r, m1, m2, modulus;
-     BigIntegerCtx c;
+BigIntegerModMul(BigInteger r, BigInteger m1, BigInteger m2, BigInteger modulus, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   BN_CTX * ctx = NULL;
@@ -742,10 +705,7 @@ BigIntegerModMul(r, m1, m2, modulus, c)
 }
 
 BigIntegerResult
-BigIntegerModExp(r, b, e, m, c, a)
-     BigInteger r, b, e, m;
-     BigIntegerCtx c;
-     BigIntegerModAccel a;
+BigIntegerModExp(BigInteger r, BigInteger b, BigInteger e, BigInteger m, BigIntegerCtx c, BigIntegerModAccel a)
 {
 #ifdef OPENSSL
 #if OPENSSL_VERSION_NUMBER >= 0x00906000
@@ -760,7 +720,11 @@ BigIntegerModExp(r, b, e, m, c, a)
   else if(a == NULL) {
     BN_mod_exp(r, b, e, m, c);
   }
-#if OPENSSL_VERSION_NUMBER >= 0x00906000
+/*
+ * In LibreSSL BN_mod_exp_mont_word() is not a public symbol where BN_mod_exp()
+ * and BN_mod_exp_mont() will use the word optimization when appropriate.
+ */
+#if OPENSSL_VERSION_NUMBER >= 0x00906000 && !defined(LIBRESSL_VERSION_NUMBER)
   else if(B > 0 && B < ULONG_MAX) {  /* 0.9.6 and above has mont_word optimization */
     BN_mod_exp_mont_word(r, B, e, m, c, a);
   }
@@ -792,9 +756,7 @@ int _mbedtls_f_rng(void* unused, unsigned char *buf, size_t size)
 #endif
 
 int
-BigIntegerCheckPrime(n, c)
-     BigInteger n;
-     BigIntegerCtx c;
+BigIntegerCheckPrime(BigInteger n, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   int rv;
@@ -802,7 +764,11 @@ BigIntegerCheckPrime(n, c)
   if(c == NULL)
     c = ctx = BN_CTX_new();
 #if OPENSSL_VERSION_NUMBER >= 0x00908000
-  rv = BN_is_prime_ex(n, 25, c, NULL);
+  #if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    rv = BN_check_prime(n, c, NULL);
+  #else
+    rv = BN_is_prime_ex(n, 25, c, NULL);
+  #endif
 #else
   rv = BN_is_prime(n, 25, NULL, c, NULL);
 #endif
@@ -845,8 +811,7 @@ BigIntegerCheckPrime(n, c)
 }
 
 BigIntegerResult
-BigIntegerFree(b)
-     BigInteger b;
+BigIntegerFree(BigInteger b)
 {
 #ifdef OPENSSL
   BN_free(b);
@@ -868,8 +833,7 @@ BigIntegerFree(b)
 }
 
 BigIntegerResult
-BigIntegerClearFree(b)
-     BigInteger b;
+BigIntegerClearFree(BigInteger b)
 {
 #ifdef OPENSSL
   BN_clear_free(b);
@@ -905,8 +869,7 @@ BigIntegerCtxNew()
 }
 
 BigIntegerResult
-BigIntegerCtxFree(ctx)
-     BigIntegerCtx ctx;
+BigIntegerCtxFree(BigIntegerCtx ctx)
 {
 #ifdef OPENSSL
   if(ctx)
@@ -916,9 +879,7 @@ BigIntegerCtxFree(ctx)
 }
 
 BigIntegerModAccel
-BigIntegerModAccelNew(m, c)
-     BigInteger m;
-     BigIntegerCtx c;
+BigIntegerModAccelNew(BigInteger m, BigIntegerCtx c)
 {
 #ifdef OPENSSL
   BN_CTX * ctx = NULL;
@@ -938,8 +899,7 @@ BigIntegerModAccelNew(m, c)
 }
 
 BigIntegerResult
-BigIntegerModAccelFree(accel)
-     BigIntegerModAccel accel;
+BigIntegerModAccelFree(BigIntegerModAccel accel)
 {
 #ifdef OPENSSL
   if(accel)
@@ -951,7 +911,7 @@ BigIntegerModAccelFree(accel)
 BigIntegerResult
 BigIntegerInitialize()
 {
-#if OPENSSL_VERSION_NUMBER >= 0x00907000
+#if OPENSSL_VERSION_NUMBER >= 0x00907000 && defined(OPENSSL_ENGINE)
   ENGINE_load_builtin_engines();
 #endif
   return BIG_INTEGER_SUCCESS;
