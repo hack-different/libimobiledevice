@@ -37,6 +37,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <stdbool.h>
 #include <time.h>
 #include <sys/stat.h>
 
@@ -1445,6 +1446,7 @@ int main(int argc, char** argv)
 	house_arrest_client_t house_arrest = NULL;
 	const char* service_name = AFC_SERVICE_NAME;
 	int use_container = 0;
+	bool use_root = false;
 
 	int c = 0;
 	const struct option longopts[] = {
@@ -1455,6 +1457,7 @@ int main(int argc, char** argv)
 		{ "version", no_argument, NULL, 'v' },
 		{ "documents", required_argument, NULL, OPT_DOCUMENTS },
 		{ "container", required_argument, NULL, OPT_CONTAINER },
+		{ "root", no_argument, NULL, 'r' },
 		{ NULL, 0, NULL, 0}
 	};
 
@@ -1483,6 +1486,9 @@ int main(int argc, char** argv)
 		case 'h':
 			print_usage(argc, argv, 0);
 			return 0;
+		case 'r':
+			use_root = true;
+			break;
 		case 'v':
 			printf("%s %s", TOOL_NAME, PACKAGE_VERSION);
 #ifdef HAVE_READLINE
@@ -1566,6 +1572,10 @@ int main(int argc, char** argv)
 
 		if (appid) {
 			service_name = HOUSE_ARREST_SERVICE_NAME;
+		}
+
+		if (use_root) {
+			service_name = AFC_SERVICE_NAME_ALTERNATE;
 		}
 
 		ldret = lockdownd_start_service(lockdown, service_name, &service);
